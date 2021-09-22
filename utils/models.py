@@ -1,4 +1,5 @@
 from enum import Enum
+from typing import Dict
 
 import numpy as np
 
@@ -54,7 +55,16 @@ class Sensor:
     • O: sensor's orientation (given by two angles).
     """
 
-    def __init__(self, characteristic: Characteristic, position: np.array, orientation: np.array):
+    def __init__(self, characteristic: Characteristic, position: np.array, orientation: np.array, dict: Dict=None):
+        """
+        Constructor.
+        :param characteristic: Characteristic object.
+        :param position: cartesian coordinates.
+        :param orientation: 2 angular coordinates.
+        :param dict: extra information storage.
+        """
         self.characteristic = characteristic
         self.position = position
         self.orientation = orientation
+        self.dict = dict
+        self.coverage = None

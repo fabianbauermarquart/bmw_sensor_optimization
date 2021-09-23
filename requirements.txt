@@ -1,7 +1,6 @@
 matplotlib==3.4.3
 numpy==1.21.2
 tqdm==4.62.2
-pulp
 seaborn
 docplex
 qiskit

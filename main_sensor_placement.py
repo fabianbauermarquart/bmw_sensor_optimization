@@ -3,9 +3,15 @@ from typing import List
 
 import matplotlib.pyplot as plt
 import numpy as np
+from docplex.mp.model import Model
 from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from pulp import LpProblem, LpVariable, LpStatus, LpMinimize, LpBinary, lpSum, allcombinations
+from qiskit import BasicAer
+from qiskit.aqua import aqua_globals, QuantumInstance
+from qiskit.aqua.algorithms import VQE
+from qiskit.optimization import QuadraticProgram
+from qiskit.optimization.algorithms import MinimumEigenOptimizer
 from seaborn import diverging_palette
 import multiprocessing as mp
 from pathlib import Path
@@ -388,10 +394,10 @@ def main():
                 else:
                     criticality_point_idx = int(row[0])
                     sensor_idx = int(row[1])
-                    coverage = row[2] == 'True'
+                    coverage = (row[2] == 'True')
 
                     if coverage:
-                        coverage_grids[sensor_idx][criticality_point_idx]
+                        coverage_grids[sensor_idx][criticality_point_idx] = True
                         conjunction_coverage_grid[criticality_point_idx] = True
 
                     row_count += 1
@@ -441,31 +447,71 @@ def main():
         :param coverage_booleans: 1 - grid point is covered by sensor setup, 0 - otherwise.
         :return: Coverage volume.
         """
-        return sum(np.array(region_of_interest_grid[:, 3]) * np.array(coverage_booleans)) \
-               / sum(np.array(region_of_interest_grid[:, 3]))
+        return np.sum(region_of_interest_grid[:, 3] * np.array(coverage_booleans, dtype=int)) \
+               / np.sum(region_of_interest_grid[:, 3])
 
-    print('Coverage for all sensor candidates:', evaluate_coverage(criticality_grid, conjunction_coverage_grid))
+    print('Coverage for all sensor candidates combined:',
+          evaluate_coverage(criticality_grid, conjunction_coverage_grid))
 
-    # Classical solution: Combinatorial optimization using MILP (PuLP).
-    # TODO: just bruteforce it by precomputing all scores.
-    coverage_weight = 10000.0
-    price_weight = 1.0
-
-    prob = LpProblem('Sensor placement', LpMinimize)
-
+    # Quantum combinatorial optimization using a quadratic program.
     sensor_candidates = sensor_candidates[:11]
     coverage_grids = coverage_grids[:11]
 
     print('Downsampled number of sensor candidates:', len(sensor_candidates))
 
-    # create list of all possible configurations
-    possible_configurations = [format(i, f'0{len(sensor_candidates)}b')
-                               for i in range(1, 2 ** len(sensor_candidates))]
+    list_of_subsets = []
 
-    for i, configuration in enumerate(possible_configurations):
-        possible_configurations[i] = tuple([int(i) for i in configuration])
+    for i, candidate in enumerate(sensor_candidates):
+        subset = []
 
-    choices = LpVariable.dicts('Choice', possible_configurations, cat=LpBinary)
+        # get index of every point seen by this sensor candidate
+        for j in range(len(coverage_grids[i])):
+            if coverage_grids[i][j]:
+                subset.append(j)
+
+        list_of_subsets.append(subset)
+
+    n = len(criticality_grid)
+    N = len(list_of_subsets)
+
+    A = 1.0
+    B = 0.0001
+    criticality_threshold = 0.7
+
+    # build model with docplex
+    mdl = Model()
+    x = [mdl.binary_var() for _ in range(N)]
+
+    objective = A * mdl.sum((1 - mdl.sum(x[i] for i in range(N)
+                                         if alpha in list_of_subsets[i])) ** 2
+                            for alpha in range(n))
+
+    objective = A * mdl.sum((1 - mdl.sum(x[i] for i in range(N)
+                                         if alpha in list_of_subsets[i])) ** 2 \
+                            + (1 - mdl.sum(x[i] for i in range(N)
+                                           if alpha in list_of_subsets[i]
+                                           and criticality_grid[alpha, 3] > criticality_threshold))
+                            for alpha in range(n)) \
+                - B * mdl.sum(sensor_candidates[i].characteristic.price for i in range(N))
+
+    mdl.minimize(objective)
+
+    # convert to Qiskit's quadratic program
+    qp = QuadraticProgram()
+    qp.from_docplex(mdl)
+
+    print(qp)
+
+    aqua_globals.random_seed = 10598
+    quantum_instance = QuantumInstance(BasicAer.get_backend('qasm_simulator'),
+                                       seed_simulator=aqua_globals.random_seed,
+                                       seed_transpiler=aqua_globals.random_seed)
+
+    vqe = VQE(quantum_instance=quantum_instance)
+    optimizer = MinimumEigenOptimizer(min_eigen_solver=vqe)
+    result = optimizer.solve(qp)
+
+    print(result)
 
     def sum_price(choice_list: List[int]) -> float:
         """
@@ -477,8 +523,6 @@ def main():
         prices = np.array([sensor.characteristic.price for sensor in sensor_candidates], dtype=float)
         return np.sum(choice_vector * prices)
 
-    prob += price_weight * lpSum([sum_price(configuration) for configuration in possible_configurations])
-
     def evaluate_choice_coverage(choice_list: List[int]) -> float:
         """
         Evaluate coverage for a given sensor configuration.
@@ -489,25 +533,13 @@ def main():
                                           for i in range(len(sensor_candidates))
                                           if choice_list[i] == 1])
 
-        return evaluate_coverage(region_of_interest_grid=criticality_grid,
-                                 coverage_booleans=coverage_grids_choice)
+        if coverage_grids_choice.shape == (0,):
+            coverage_grids_choice = np.zeros(len(criticality_grid))
 
-    prob += -coverage_weight * lpSum([evaluate_choice_coverage(configuration)
-                                      for configuration in possible_configurations])
+        coverage = evaluate_coverage(region_of_interest_grid=criticality_grid,
+                                     coverage_booleans=coverage_grids_choice)
 
-    # The problem data is written to an .lp file
-    prob.writeLP("Sensor_placement.lp")
-
-    # The problem is solved using PuLP's choice of Solver
-    prob.solve()
-
-    # The status of the solution is printed to the screen
-    print("Status:", LpStatus[prob.status])
-
-    print("The chosen configurations are out of a total of %s:" % len(possible_configurations))
-    for configuration in possible_configurations:
-        if choices[configuration].value() == 1.0:
-            print(configuration)
+        return coverage
 
 
 if __name__ == "__main__":

@@ -453,8 +453,8 @@ def main():
           evaluate_coverage(criticality_grid, conjunction_coverage_grid))
 
     # Quantum combinatorial optimization using a quadratic program.
-    sensor_candidates = sensor_candidates[:11]
-    coverage_grids = coverage_grids[:11]
+    sensor_candidates = sensor_candidates[:4]
+    coverage_grids = coverage_grids[:4]
 
     print('Downsampled number of sensor candidates:', len(sensor_candidates))
 
@@ -473,7 +473,7 @@ def main():
     n = len(criticality_grid)
     N = len(list_of_subsets)
 
-    p = [sensor_candidates[i].characteristic.price for i in range(N)]
+    p = [float(sensor_candidates[i].characteristic.price) for i in range(N)]
 
     A = 1.0
     B = 0.0001
@@ -484,16 +484,12 @@ def main():
     x = [mdl.binary_var() for _ in range(N)]
 
     objective = A * mdl.sum((1 - mdl.sum(x[i] for i in range(N)
-                                         if alpha in list_of_subsets[i])) ** 2
-                            for alpha in range(n))
-
-    objective = A * mdl.sum((1 - mdl.sum(x[i] for i in range(N)
                                          if alpha in list_of_subsets[i])) ** 2 \
                             + (1 - mdl.sum(x[i] for i in range(N)
                                            if alpha in list_of_subsets[i]
                                            and criticality_grid[alpha, 3] > criticality_threshold))
                             for alpha in range(n)) \
-                - B * mdl.sum(x[i] * p[i])
+                - B * mdl.sum(x[i] * p[i] for i in range(N))
 
     mdl.minimize(objective)
 

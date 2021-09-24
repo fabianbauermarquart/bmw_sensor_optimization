@@ -26,3 +26,10 @@ __Finally__, it will be formulated as an Ising Hamiltonian to use with a variati
 - seaborn
 - docplex
 - qiskit
+
+
+## Data
+
+The original `Sensor_position` data is copyrighted by BMW group and cannot be made public here.
+Intermediate data used for later calculations, however, is included in this repository, with the files `sensor_candidates.csv` and `coverage.csv`.
+

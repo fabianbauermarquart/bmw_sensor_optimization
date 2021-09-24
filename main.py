@@ -489,7 +489,7 @@ def main():
                                            if alpha in list_of_subsets[i]
                                            and criticality_grid[alpha, 3] > criticality_threshold))
                             for alpha in range(n)) \
-                - B * mdl.sum(x[i] * p[i] for i in range(N))
+                + B * mdl.sum(x[i] * p[i] for i in range(N))
 
     mdl.minimize(objective)
 

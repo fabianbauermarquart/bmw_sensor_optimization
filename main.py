@@ -194,9 +194,11 @@ def main():
     palette = diverging_palette(0, 255, sep=8, n=256)
     criticality_palette = [palette[int(v * 255)] for v in criticality_grid_display[:, 3]]
 
-    # ax.scatter(criticality_grid_display[:, 0], criticality_grid_display[:, 1], criticality_grid_display[:, 2],
-    #            s=1,
-    #            c=criticality_palette, alpha=0.5)
+    ax.scatter(criticality_grid_display[:, 0], criticality_grid_display[:, 1], criticality_grid_display[:, 2],
+               s=1,
+               c=criticality_palette, alpha=0.5)
+
+    # plt.show()
 
     # Basic sensors
 
@@ -453,8 +455,10 @@ def main():
           evaluate_coverage(criticality_grid, conjunction_coverage_grid))
 
     # Quantum combinatorial optimization using a quadratic program.
-    sensor_candidates = sensor_candidates[:4]
-    coverage_grids = coverage_grids[:4]
+    sample = 4
+
+    sensor_candidates = sensor_candidates[:sample]
+    coverage_grids = coverage_grids[:sample]
 
     print('Downsampled number of sensor candidates:', len(sensor_candidates))
 
@@ -480,11 +484,13 @@ def main():
     criticality_threshold = 0.7
 
     # build model with docplex
+    print('Building model with docplex...')
+
     mdl = Model()
     x = [mdl.binary_var() for _ in range(N)]
 
     objective = A * mdl.sum((1 - mdl.sum(x[i] for i in range(N)
-                                         if alpha in list_of_subsets[i])) ** 2 \
+                                         if alpha in list_of_subsets[i])) ** 2
                             + (1 - mdl.sum(x[i] for i in range(N)
                                            if alpha in list_of_subsets[i]
                                            and criticality_grid[alpha, 3] > criticality_threshold))
@@ -499,17 +505,36 @@ def main():
 
     print(qp)
 
+    print(qp.to_ising())
+
     aqua_globals.random_seed = 10598
     quantum_instance = QuantumInstance(BasicAer.get_backend('qasm_simulator'),
                                        seed_simulator=aqua_globals.random_seed,
                                        seed_transpiler=aqua_globals.random_seed)
 
     vqe = VQE(quantum_instance=quantum_instance)
+
     optimizer = MinimumEigenOptimizer(min_eigen_solver=vqe)
+
     result = optimizer.solve(qp)
 
     print(result)
 
+    print(result.variables_dict)
+
+    optimal_configuration_coverage_grid = [False] * len(criticality_grid)
+
+    for sensor_idx in range(len(sensor_candidates)):
+        if result.variables_dict[f'x{sensor_idx}'] != 1.0:
+            continue
+
+        for criticality_point_idx in range(len(coverage_grids[0])):
+            if coverage_grids[sensor_idx][criticality_point_idx]:
+                optimal_configuration_coverage_grid[criticality_point_idx] = True
+
+    optimal_coverage = evaluate_coverage(criticality_grid, optimal_configuration_coverage_grid)
+
+    print('Coverage for optimal configuration:', optimal_coverage)
 
 
 if __name__ == "__main__":
